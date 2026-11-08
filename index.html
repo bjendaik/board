@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bảng Quản Lý Hàng Tồn Khách Kho</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #151e2e;
+      --border: #243247;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --success: #10b981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 20px; min-height: 100vh; }
+    .container { max-width: 1440px; margin: 0 auto; }
+
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 12px; }
+    h1 { font-size: 1.4rem; font-weight: 700; color: #fff; }
+    
+    .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .stat-box { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+    .stat-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+    .stat-value.warn { color: var(--warning); }
+    .stat-value.info { color: var(--accent); }
+
+    .search-row { display: flex; gap: 12px; margin-bottom: 16px; }
+    .search-input { flex: 1; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 0.9rem; }
+    .search-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+    .btn-refresh { background: #1e293b; border: 1px solid var(--border); color: #fff; padding: 0 18px; border-radius: 8px; cursor: pointer; font-size: 0.88rem; font-weight: 500; }
+    .btn-refresh:hover { background: #334155; }
+
+    .table-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; max-height: 75vh; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; text-align: left; }
+    thead th { background: #111827; position: sticky; top: 0; padding: 12px 14px; font-weight: 600; color: #cbd5e1; border-bottom: 1px solid var(--border); z-index: 1; white-space: nowrap; }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+    tbody tr:hover { background: rgba(56, 189, 248, 0.05); }
+
+    .tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .tag-warn { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+    .tag-danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+    .tag-blue { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+
+    #loading { text-align: center; padding: 40px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Quản Lý Hàng Tồn Khách Kho</h1>
+        <p id="sourceInfo" style="color: var(--text-muted); font-size: 0.85rem; margin-top: 3px;">Nguồn dữ liệu: Google Sheets</p>
+      </div>
+      <button class="btn-refresh" onclick="fetchData()">Đồng bộ lại</button>
+    </header>
+
+    <div class="stats-bar">
+      <div class="stat-box">
+        <div class="stat-label">Tổng linh kiện tồn</div>
+        <div class="stat-value warn" id="totalCount">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Tồn trên 7 ngày</div>
+        <div class="stat-value" id="longStayCount" style="color: var(--danger);">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Thời điểm đồng bộ</div>
+        <div class="stat-value info" id="syncTime" style="font-size: 1.1rem; line-height: 2;">--</div>
+      </div>
+    </div>
+
+    <div class="search-row">
+      <input type="text" id="filterInput" class="search-input" placeholder="Tìm kiếm nhanh theo mã sửa, tên khách, linh kiện, chi nhánh..." oninput="filterTable()">
+    </div>
+
+    <div class="table-container">
+      <div id="loading">Đang tải dữ liệu hàng tồn từ Google Sheets...</div>
+      <table id="tableData" style="display: none;">
+        <thead id="tblHead"></thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // Điền URL Apps Script Web App của bạn vào đây
+    const API_URL = "URL_APPS_SCRIPT_CUA_BAN";
+
+    let dataset = [];
+
+    async function fetchData() {
+      const loading = document.getElementById("loading");
+      const table = document.getElementById("tableData");
+      loading.style.display = "block";
+      loading.textContent = "Đang tải dữ liệu hàng tồn...";
+      table.style.display = "none";
+
+      try {
+        const res = await fetch(API_URL);
+        const json = await res.json();
+
+        if (json.status !== "success") throw new Error(json.message || "Không thể tải dữ liệu");
+
+        dataset = json.data || [];
+        document.getElementById("sourceInfo").textContent = `Sheet: ${json.sheetName || 'Tồn khách kho'} (${dataset.length} bản ghi)`;
+        document.getElementById("totalCount").textContent = dataset.length;
+        document.getElementById("syncTime").textContent = new Date().toLocaleTimeString("vi-VN", { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // Tính số ca tồn trên 7 ngày
+        let longStay = 0;
+        dataset.forEach(item => {
+          const days = parseInt(item["Thời gian tồn (ngày)"] || item["Số ngày sửa chữa"] || 0);
+          if (days >= 7) longStay++;
+        });
+        document.getElementById("longStayCount").textContent = longStay;
+
+        renderGrid(dataset);
+        loading.style.display = "none";
+        table.style.display = "table";
+      } catch (err) {
+        loading.textContent = "Lỗi khi lấy dữ liệu: " + err.message;
+        console.error(err);
+      }
+    }
+
+    function renderGrid(rows) {
+      const thead = document.getElementById("tblHead");
+      const tbody = document.getElementById("tblBody");
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="100%" style="text-align: center; padding: 24px; color: var(--text-muted);">Không có hàng tồn nào</td></tr>';
+        return;
+      }
+
+      const headers = Object.keys(rows[0]);
+
+      // Tạo header
+      const trHead = document.createElement("tr");
+      headers.forEach(h => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+
+      // Tạo thân bảng
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+        headers.forEach(h => {
+          const td = document.createElement("td");
+          const val = row[h];
+
+          if (String(h).includes("Thời gian tồn")) {
+            const num = parseInt(val) || 0;
+            td.innerHTML = `<span class="tag ${num >= 7 ? 'tag-danger' : 'tag-warn'}">${val} ngày</span>`;
+          } else if (String(h).includes("mã sửa")) {
+            td.innerHTML = `<span class="tag tag-blue">${val}</span>`;
+          } else {
+            td.textContent = val;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterTable() {
+      const q = document.getElementById("filterInput").value.toLowerCase();
+      const filtered = dataset.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
+      renderGrid(filtered);
+    }
+
+    window.addEventListener("DOMContentLoaded", fetchData);
+  </script>
+</body>
+</html>
